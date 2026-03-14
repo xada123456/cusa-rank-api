@@ -24,18 +24,22 @@ function validateEnv() {
   if (!API_KEY) {
     throw new Error("Missing ROBLOX_API_KEY environment variable");
   }
+
   if (!SECRET) {
     throw new Error("Missing SECRET environment variable");
   }
 }
 
 async function getRoleIdFromRankNumber(groupId, rankNumber) {
-  const response = await fetch(`https://groups.roblox.com/v1/groups/${groupId}/roles`, {
-    method: "GET",
-    headers: {
-      "x-api-key": API_KEY
+  const response = await fetch(
+    `https://groups.roblox.com/v1/groups/${groupId}/roles`,
+    {
+      method: "GET",
+      headers: {
+        "x-api-key": API_KEY
+      }
     }
-  });
+  );
 
   const text = await response.text();
   console.log("[ROLES RAW]", text);
@@ -55,11 +59,14 @@ async function getRoleIdFromRankNumber(groupId, rankNumber) {
     throw new Error("Roles response is invalid.");
   }
 
-  console.log("[ROLES LIST]", data.roles.map(r => ({
-    id: r.id,
-    name: r.name,
-    rank: r.rank
-  })));
+  console.log(
+    "[ROLES LIST]",
+    data.roles.map(r => ({
+      id: r.id,
+      name: r.name,
+      rank: r.rank
+    }))
+  );
 
   const role = data.roles.find(r => Number(r.rank) === Number(rankNumber));
 
@@ -90,7 +97,11 @@ app.post("/promote", async (req, res) => {
       });
     }
 
-    if (groupId === undefined || userId === undefined || targetRank === undefined) {
+    if (
+      groupId === undefined ||
+      userId === undefined ||
+      targetRank === undefined
+    ) {
       return res.status(400).json({
         success: false,
         error: "groupId, userId, and targetRank are required"
@@ -112,7 +123,10 @@ app.post("/promote", async (req, res) => {
       });
     }
 
-    const roleId = await getRoleIdFromRankNumber(numericGroupId, numericTargetRank);
+    const roleId = await getRoleIdFromRankNumber(
+      numericGroupId,
+      numericTargetRank
+    );
 
     console.log("[ROLE FOUND]", {
       groupId: numericGroupId,
