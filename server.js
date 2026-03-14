@@ -12,6 +12,14 @@ app.get("/", (req, res) => {
   res.send("Rank API running");
 });
 
+app.get("/test", (req, res) => {
+  res.json({
+    ok: true,
+    hasApiKey: !!API_KEY,
+    hasSecret: !!SECRET
+  });
+});
+
 function validateEnv() {
   if (!API_KEY) {
     throw new Error("Missing ROBLOX_API_KEY environment variable");
@@ -34,6 +42,7 @@ async function getRoleIdFromRankNumber(groupId, rankNumber) {
   );
 
   const text = await response.text();
+  console.log("[ROLES RAW]", text);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch roles: ${response.status} ${text}`);
@@ -50,6 +59,15 @@ async function getRoleIdFromRankNumber(groupId, rankNumber) {
     throw new Error("Roles response is invalid.");
   }
 
+  console.log(
+    "[ROLES LIST]",
+    data.roles.map(r => ({
+      id: r.id,
+      name: r.name,
+      rank: r.rank
+    }))
+  );
+
   const role = data.roles.find(r => Number(r.rank) === Number(rankNumber));
 
   if (!role) {
@@ -64,6 +82,13 @@ app.post("/promote", async (req, res) => {
     validateEnv();
 
     const { groupId, userId, targetRank, secret } = req.body;
+
+    console.log("[PROMOTE INCOMING]", {
+      groupId,
+      userId,
+      targetRank,
+      hasSecret: !!secret
+    });
 
     if (secret !== SECRET) {
       return res.status(403).json({
@@ -103,6 +128,12 @@ app.post("/promote", async (req, res) => {
       numericTargetRank
     );
 
+    console.log("[ROLE FOUND]", {
+      groupId: numericGroupId,
+      targetRank: numericTargetRank,
+      roleId
+    });
+
     const response = await fetch(
       `https://apis.roblox.com/cloud/v2/groups/${numericGroupId}/memberships/users/${numericUserId}`,
       {
@@ -118,6 +149,12 @@ app.post("/promote", async (req, res) => {
     );
 
     const text = await response.text();
+
+    console.log("[ROBLOX PATCH RESULT]", {
+      status: response.status,
+      ok: response.ok,
+      body: text
+    });
 
     if (!response.ok) {
       return res.status(response.status).json({
@@ -142,6 +179,7 @@ app.post("/promote", async (req, res) => {
       robloxResponse: parsedResponse
     });
   } catch (err) {
+    console.error("[PROMOTE ERROR]", err);
     return res.status(500).json({
       success: false,
       error: err.message || "Unknown server error"
