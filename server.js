@@ -21,20 +21,39 @@ app.get("/test", (req, res) => {
 });
 
 function validateEnv() {
-  if (!API_KEY) {
-    throw new Error("Missing ROBLOX_API_KEY environment variable");
-  }
-
-  if (!SECRET) {
-    throw new Error("Missing SECRET environment variable");
-  }
+  if (!API_KEY) throw new Error("Missing ROBLOX_API_KEY");
+  if (!SECRET) throw new Error("Missing SECRET");
 }
 
 async function getRoleIdFromRankNumber(groupId, rankNumber) {
+
   const response = await fetch(
-    `https://groups.roblox.com/v1/groups/${groupId}/roles`,
+    `https://groups.roblox.com/v1/groups/${groupId}/roles`
+  );
+
+  const text = await response.text();
+  console.log("[ROLES RAW]", text);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch roles: ${response.status}`);
+  }
+
+  const data = JSON.parse(text);
+
+  const role = data.roles.find(r => r.rank === Number(rankNumber));
+
+  if (!role) {
+    throw new Error("Role not found for rank: " + rankNumber);
+  }
+
+  return role.id;
+}
+
+async function getMembershipId(groupId, userId) {
+
+  const response = await fetch(
+    `https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships`,
     {
-      method: "GET",
       headers: {
         "x-api-key": API_KEY
       }
@@ -42,136 +61,49 @@ async function getRoleIdFromRankNumber(groupId, rankNumber) {
   );
 
   const text = await response.text();
-  console.log("[ROLES RAW]", text);
+  console.log("[MEMBERSHIPS RAW]", text);
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch roles: ${response.status} ${text}`);
+    throw new Error(`Membership fetch failed: ${response.status}`);
   }
 
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON from roles endpoint: ${text}`);
-  }
+  const data = JSON.parse(text);
 
-  if (!data.roles || !Array.isArray(data.roles)) {
-    throw new Error("Roles response is invalid.");
-  }
+  const memberships = data.groupMemberships || data.memberships || [];
 
-  console.log(
-    "[ROLES LIST]",
-    data.roles.map(r => ({
-      id: r.id,
-      name: r.name,
-      rank: r.rank
-    }))
-  );
+  for (const m of memberships) {
 
-  const role = data.roles.find(r => Number(r.rank) === Number(rankNumber));
+    const userMatch = String(m.user || "").match(/users\/(\d+)/);
 
-  if (!role) {
-    throw new Error(`No role found for rank number ${rankNumber}`);
-  }
+    if (userMatch && Number(userMatch[1]) === Number(userId)) {
 
-  return role.id;
-}
+      const membershipMatch = String(m.path || "").match(/memberships\/(.+)/);
 
-async function getMembershipId(groupId, userId) {
-  let nextPageToken = null;
-
-  while (true) {
-    const url = new URL(`https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships`);
-    if (nextPageToken) {
-      url.searchParams.set("pageToken", nextPageToken);
-    }
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: {
-        "x-api-key": API_KEY
-      }
-    });
-
-    const text = await response.text();
-    console.log("[MEMBERSHIPS RAW]", text);
-
-    if (!response.ok) {
-      throw new Error(`Failed to list memberships: ${response.status} ${text}`);
-    }
-
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(`Invalid JSON from memberships endpoint: ${text}`);
-    }
-
-    const memberships = Array.isArray(data.groupMemberships)
-      ? data.groupMemberships
-      : Array.isArray(data.memberships)
-      ? data.memberships
-      : [];
-
-    const match = memberships.find(m => {
-      const path = m.user || m.member || "";
-      const idMatch = String(path).match(/users\/(\d+)$/);
-      return idMatch && Number(idMatch[1]) === Number(userId);
-    });
-
-    if (match) {
-      const membershipPath = match.path || match.name || match.id || "";
-      const membershipIdMatch = String(membershipPath).match(/memberships\/([^/]+)$/);
-
-      if (membershipIdMatch) {
-        return membershipIdMatch[1];
+      if (membershipMatch) {
+        return membershipMatch[1];
       }
 
-      if (match.id) {
-        return match.id;
+      if (m.id) {
+        return m.id;
       }
-
-      throw new Error(`Membership found for user ${userId}, but membership id could not be parsed`);
     }
-
-    if (!data.nextPageToken) {
-      break;
-    }
-
-    nextPageToken = data.nextPageToken;
   }
 
-  throw new Error(`No membership found for user ${userId} in group ${groupId}`);
+  throw new Error("Membership not found for user");
 }
 
 app.post("/promote", async (req, res) => {
+
   try {
+
     validateEnv();
 
     const { groupId, userId, targetRank, secret } = req.body;
 
-    console.log("[PROMOTE INCOMING]", {
-      groupId,
-      userId,
-      targetRank,
-      hasSecret: !!secret
-    });
-
     if (secret !== SECRET) {
       return res.status(403).json({
-        success: false,
-        error: "Invalid secret"
-      });
-    }
-
-    if (
-      groupId === undefined ||
-      userId === undefined ||
-      targetRank === undefined
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "groupId, userId, and targetRank are required"
+        success:false,
+        error:"Invalid secret"
       });
     }
 
@@ -179,24 +111,17 @@ app.post("/promote", async (req, res) => {
     const numericUserId = Number(userId);
     const numericTargetRank = Number(targetRank);
 
-    if (
-      Number.isNaN(numericGroupId) ||
-      Number.isNaN(numericUserId) ||
-      Number.isNaN(numericTargetRank)
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "groupId, userId, and targetRank must be numbers"
-      });
-    }
+    const roleId = await getRoleIdFromRankNumber(
+      numericGroupId,
+      numericTargetRank
+    );
 
-    const roleId = await getRoleIdFromRankNumber(numericGroupId, numericTargetRank);
-    const membershipId = await getMembershipId(numericGroupId, numericUserId);
+    const membershipId = await getMembershipId(
+      numericGroupId,
+      numericUserId
+    );
 
     console.log("[ROLE FOUND]", {
-      groupId: numericGroupId,
-      userId: numericUserId,
-      targetRank: numericTargetRank,
       roleId,
       membershipId
     });
@@ -204,10 +129,10 @@ app.post("/promote", async (req, res) => {
     const response = await fetch(
       `https://apis.roblox.com/cloud/v2/groups/${numericGroupId}/memberships/${membershipId}`,
       {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": API_KEY
+        method:"PATCH",
+        headers:{
+          "Content-Type":"application/json",
+          "x-api-key":API_KEY
         },
         body: JSON.stringify({
           role: `groups/${numericGroupId}/roles/${roleId}`
@@ -217,44 +142,35 @@ app.post("/promote", async (req, res) => {
 
     const text = await response.text();
 
-    console.log("[ROBLOX PATCH RESULT]", {
-      status: response.status,
-      ok: response.ok,
-      body: text
-    });
+    console.log("[PATCH RESULT]", text);
 
     if (!response.ok) {
       return res.status(response.status).json({
-        success: false,
-        error: "Roblox API request failed",
-        status: response.status,
-        robloxResponse: text
+        success:false,
+        roblox:text
       });
     }
 
-    let parsedResponse;
-    try {
-      parsedResponse = text ? JSON.parse(text) : null;
-    } catch {
-      parsedResponse = text;
-    }
-
     return res.json({
-      success: true,
-      message: "Promotion successful",
+      success:true,
+      message:"Promotion success",
       roleId,
-      membershipId,
-      robloxResponse: parsedResponse
+      membershipId
     });
-  } catch (err) {
-    console.error("[PROMOTE ERROR]", err);
-    return res.status(500).json({
-      success: false,
-      error: err.message || "Unknown server error"
+
+  } catch(err){
+
+    console.error(err);
+
+    res.status(500).json({
+      success:false,
+      error:err.message
     });
+
   }
+
 });
 
 app.listen(PORT, () => {
-  console.log(`Rank API running on port ${PORT}`);
+  console.log("Rank API running on port", PORT);
 });
