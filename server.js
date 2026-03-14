@@ -16,18 +16,22 @@ function validateEnv() {
   if (!API_KEY) {
     throw new Error("Missing ROBLOX_API_KEY environment variable");
   }
+
   if (!SECRET) {
     throw new Error("Missing SECRET environment variable");
   }
 }
 
 async function getRoleIdFromRankNumber(groupId, rankNumber) {
-  const response = await fetch(`https://groups.roblox.com/v1/groups/${groupId}/roles`, {
-    method: "GET",
-    headers: {
-      "x-api-key": API_KEY
+  const response = await fetch(
+    `https://groups.roblox.com/v1/groups/${groupId}/roles`,
+    {
+      method: "GET",
+      headers: {
+        "x-api-key": API_KEY
+      }
     }
-  });
+  );
 
   const text = await response.text();
 
@@ -94,10 +98,13 @@ app.post("/promote", async (req, res) => {
       });
     }
 
-    const roleId = await getRoleIdFromRankNumber(numericGroupId, numericTargetRank);
+    const roleId = await getRoleIdFromRankNumber(
+      numericGroupId,
+      numericTargetRank
+    );
 
     const response = await fetch(
-      `https://apis.roblox.com/cloud/v2/groups/${numericGroupId}/memberships/${numericUserId}`,
+      `https://apis.roblox.com/cloud/v2/groups/${numericGroupId}/memberships/users/${numericUserId}`,
       {
         method: "PATCH",
         headers: {
