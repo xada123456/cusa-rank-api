@@ -5,13 +5,21 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-
 const API_KEY = process.env.ROBLOX_API_KEY;
 const SECRET = process.env.SECRET;
 
 app.get("/", (req, res) => {
   res.send("Rank API running");
 });
+
+function validateEnv() {
+  if (!API_KEY) {
+    throw new Error("Missing ROBLOX_API_KEY environment variable");
+  }
+  if (!SECRET) {
+    throw new Error("Missing SECRET environment variable");
+  }
+}
 
 async function getRoleIdFromRankNumber(groupId, rankNumber) {
   const response = await fetch(`https://groups.roblox.com/v1/groups/${groupId}/roles`, {
@@ -27,7 +35,12 @@ async function getRoleIdFromRankNumber(groupId, rankNumber) {
     throw new Error(`Failed to fetch roles: ${response.status} ${text}`);
   }
 
-  const data = JSON.parse(text);
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON from roles endpoint: ${text}`);
+  }
 
   if (!data.roles || !Array.isArray(data.roles)) {
     throw new Error("Roles response is invalid.");
@@ -43,24 +56,48 @@ async function getRoleIdFromRankNumber(groupId, rankNumber) {
 }
 
 app.post("/promote", async (req, res) => {
-  const { groupId, userId, targetRank, secret } = req.body;
-
-  if (secret !== SECRET) {
-    return res.status(403).json({ success: false, error: "Invalid secret" });
-  }
-
-  if (!groupId || !userId || !targetRank) {
-    return res.status(400).json({
-      success: false,
-      error: "groupId, userId, and targetRank are required"
-    });
-  }
-
   try {
-    const roleId = await getRoleIdFromRankNumber(groupId, targetRank);
+    validateEnv();
+
+    const { groupId, userId, targetRank, secret } = req.body;
+
+    if (secret !== SECRET) {
+      return res.status(403).json({
+        success: false,
+        error: "Invalid secret"
+      });
+    }
+
+    if (
+      groupId === undefined ||
+      userId === undefined ||
+      targetRank === undefined
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "groupId, userId, and targetRank are required"
+      });
+    }
+
+    const numericGroupId = Number(groupId);
+    const numericUserId = Number(userId);
+    const numericTargetRank = Number(targetRank);
+
+    if (
+      Number.isNaN(numericGroupId) ||
+      Number.isNaN(numericUserId) ||
+      Number.isNaN(numericTargetRank)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "groupId, userId, and targetRank must be numbers"
+      });
+    }
+
+    const roleId = await getRoleIdFromRankNumber(numericGroupId, numericTargetRank);
 
     const response = await fetch(
-      `https://apis.roblox.com/cloud/v2/groups/${groupId}/members/${userId}`,
+      `https://apis.roblox.com/cloud/v2/groups/${numericGroupId}/memberships/${numericUserId}`,
       {
         method: "PATCH",
         headers: {
@@ -68,7 +105,7 @@ app.post("/promote", async (req, res) => {
           "x-api-key": API_KEY
         },
         body: JSON.stringify({
-          role: `groups/${groupId}/roles/${roleId}`
+          role: `groups/${numericGroupId}/roles/${roleId}`
         })
       }
     );
@@ -84,20 +121,27 @@ app.post("/promote", async (req, res) => {
       });
     }
 
+    let parsedResponse;
+    try {
+      parsedResponse = text ? JSON.parse(text) : null;
+    } catch {
+      parsedResponse = text;
+    }
+
     return res.json({
       success: true,
       message: "Promotion successful",
       roleId,
-      robloxResponse: text
+      robloxResponse: parsedResponse
     });
   } catch (err) {
     return res.status(500).json({
       success: false,
-      error: err.message
+      error: err.message || "Unknown server error"
     });
   }
 });
 
 app.listen(PORT, () => {
-  console.log("Rank API running");
+  console.log(`Rank API running on port ${PORT}`);
 });
