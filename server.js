@@ -77,6 +77,73 @@ async function getRoleIdFromRankNumber(groupId, rankNumber) {
   return role.id;
 }
 
+async function getMembershipId(groupId, userId) {
+  let nextPageToken = null;
+
+  while (true) {
+    const url = new URL(`https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships`);
+    if (nextPageToken) {
+      url.searchParams.set("pageToken", nextPageToken);
+    }
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "x-api-key": API_KEY
+      }
+    });
+
+    const text = await response.text();
+    console.log("[MEMBERSHIPS RAW]", text);
+
+    if (!response.ok) {
+      throw new Error(`Failed to list memberships: ${response.status} ${text}`);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`Invalid JSON from memberships endpoint: ${text}`);
+    }
+
+    const memberships = Array.isArray(data.groupMemberships)
+      ? data.groupMemberships
+      : Array.isArray(data.memberships)
+      ? data.memberships
+      : [];
+
+    const match = memberships.find(m => {
+      const path = m.user || m.member || "";
+      const idMatch = String(path).match(/users\/(\d+)$/);
+      return idMatch && Number(idMatch[1]) === Number(userId);
+    });
+
+    if (match) {
+      const membershipPath = match.path || match.name || match.id || "";
+      const membershipIdMatch = String(membershipPath).match(/memberships\/([^/]+)$/);
+
+      if (membershipIdMatch) {
+        return membershipIdMatch[1];
+      }
+
+      if (match.id) {
+        return match.id;
+      }
+
+      throw new Error(`Membership found for user ${userId}, but membership id could not be parsed`);
+    }
+
+    if (!data.nextPageToken) {
+      break;
+    }
+
+    nextPageToken = data.nextPageToken;
+  }
+
+  throw new Error(`No membership found for user ${userId} in group ${groupId}`);
+}
+
 app.post("/promote", async (req, res) => {
   try {
     validateEnv();
@@ -123,20 +190,19 @@ app.post("/promote", async (req, res) => {
       });
     }
 
-    const roleId = await getRoleIdFromRankNumber(
-      numericGroupId,
-      numericTargetRank
-    );
+    const roleId = await getRoleIdFromRankNumber(numericGroupId, numericTargetRank);
+    const membershipId = await getMembershipId(numericGroupId, numericUserId);
 
     console.log("[ROLE FOUND]", {
       groupId: numericGroupId,
       userId: numericUserId,
       targetRank: numericTargetRank,
-      roleId
+      roleId,
+      membershipId
     });
 
     const response = await fetch(
-      `https://apis.roblox.com/cloud/v2/groups/${numericGroupId}/memberships/users/${numericUserId}`,
+      `https://apis.roblox.com/cloud/v2/groups/${numericGroupId}/memberships/${membershipId}`,
       {
         method: "PATCH",
         headers: {
@@ -177,6 +243,7 @@ app.post("/promote", async (req, res) => {
       success: true,
       message: "Promotion successful",
       roleId,
+      membershipId,
       robloxResponse: parsedResponse
     });
   } catch (err) {
